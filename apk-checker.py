@@ -10,7 +10,12 @@ def getBaseInfo(apkpath, md5_to_check=""):
     print 80 * '-'
 
     # check info | egrep 'package|application-label-zh-CN'
-    result = os.popen("./aapt d badging %s  " % apkpath).read()
+    aapt_cmd = "./aapt"
+    if os.name == 'nt':
+        # check for Windows
+        aapt_cmd = "win\\aapt.exe"
+
+    result = os.popen(aapt_cmd + " d badging %s  " % apkpath).read()
 
     match = re.compile(
         "package: name='(\S+)' versionCode='(\d+)' versionName='(\S+)' ").match(result)
@@ -21,13 +26,13 @@ def getBaseInfo(apkpath, md5_to_check=""):
     versioncode = match.group(2)
     versionname = match.group(3)
 
-    #print result
-    sub = "application-label-zh-CN"
+    # print result
+    sub = "application-label-en-GB"
     startpos = result.index(sub)
     endpos = result.index("'", startpos + len(sub) + 2)
 
     print "package: name=%s, versionCode=%s, versionName=%s" % (packagename, versioncode, versionname)
-    print (result[startpos:endpos])
+    print (result[startpos:endpos + 1])
 
     file = open(apkpath, "rb")
     md5_checksum = hashlib.md5(file.read()).hexdigest()
