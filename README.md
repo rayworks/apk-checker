@@ -7,6 +7,14 @@ Usage:
 python apk-checker.py [full-path-to-apk-file] [file-md5-to-check]
 ```
 
+Sample Output:
+```
+--------------------------------------------------------------------------------
+package: name=your-app-pkgname, versionCode=**, versionName=**
+application-label-en-GB:'app-name-en'
+Generated md5: e1a423555d9dc0905e129b784bdd75c1
+--------------------------------------------------------------------------------
+```
 Inspired by [checkapk](https://github.com/viclee2014/checkapk).
 
 
