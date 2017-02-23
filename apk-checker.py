@@ -15,7 +15,7 @@ def getBaseInfo(apkpath, md5_to_check=""):
         # check for Windows
         aapt_cmd = "win\\aapt.exe"
 
-    result = os.popen(aapt_cmd + " d badging %s  " % apkpath).read()
+    result = os.popen(aapt_cmd + " d badging '%s'  " % apkpath).read()
 
     match = re.compile(
         "package: name='(\S+)' versionCode='(\d+)' versionName='(\S+)' ").match(result)
