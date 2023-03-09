@@ -7,7 +7,7 @@ import hashlib
 
 
 def getBaseInfo(apkpath, md5_to_check=""):
-    print 80 * '-'
+    print(80 * '-')
 
     # check info | egrep 'package|application-label-zh-CN'
     aapt_cmd = "./aapt"
@@ -31,19 +31,19 @@ def getBaseInfo(apkpath, md5_to_check=""):
     startpos = result.index(sub)
     endpos = result.index("'", startpos + len(sub) + 2)
 
-    print "package: name=%s, versionCode=%s, versionName=%s" % (packagename, versioncode, versionname)
-    print (result[startpos:endpos + 1])
+    print("package: name=%s, versionCode=%s, versionName=%s" % (packagename, versioncode, versionname))
+    print(result[startpos:endpos + 1])
 
     file = open(apkpath, "rb")
     md5_checksum = hashlib.md5(file.read()).hexdigest()
     file.close()
 
-    print "Generated md5:", md5_checksum
+    print("Generated md5:", md5_checksum)
 
     if md5_to_check != "":
-        print "Equal to given MD5 ? ", md5_checksum == md5_to_check
+        print("Equal to given MD5 ? ", md5_checksum == md5_to_check)
 
-    print 80 * '-'
+    print(80 * '-')
 
 
 def getCurrentDirApk():
@@ -70,7 +70,7 @@ if __name__ == '__main__':
         md5_origin = sys.argv[2]
     else:
         usage = "Usage: python apk-checker.py [full-path-to-apk-file] [file-md5-to-check]"
-        print usage
+        print(usage)
         exit()
 
     if not apkName:
