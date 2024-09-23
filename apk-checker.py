@@ -34,6 +34,13 @@ def getBaseInfo(apkpath, md5_to_check=""):
     print("package: name=%s, versionCode=%s, versionName=%s" % (packagename, versioncode, versionname))
     print(result[startpos:endpos + 1])
 
+    # native-code: 'arm64-v8a' 'armeabi-v7a'
+    match = re.compile("native-code: ([^\n])+").search(result)
+    abi_info = match.group(0)
+    rx = re.compile('\'[^ ]*\'')
+    res = rx.findall(abi_info)
+    print("abiFilters : %s" % res)
+
     file = open(apkpath, "rb")
     md5_checksum = hashlib.md5(file.read()).hexdigest()
     file.close()
