@@ -27,12 +27,15 @@ def getBaseInfo(apkpath, md5_to_check=""):
     versionname = match.group(3)
 
     # print result
-    sub = "application-label-en-GB"
-    startpos = result.index(sub)
-    endpos = result.index("'", startpos + len(sub) + 2)
-
     print("package: name=%s, versionCode=%s, versionName=%s" % (packagename, versioncode, versionname))
-    print(result[startpos:endpos + 1])
+
+    sub = "application-label"
+    try:
+        startpos = result.index(sub)
+        endpos = result.index("'", startpos + len(sub) + 2)
+        print(result[startpos:endpos + 1])
+    except ValueError:
+        print("Failed to output the label info")
 
     # native-code: 'arm64-v8a' 'armeabi-v7a'
     match = re.compile("native-code: ([^\n])+").search(result)
