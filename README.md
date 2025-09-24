@@ -1,8 +1,12 @@
 # apk-checker
 
-A python script to check the key information of target APK file.
+The python scripts used to process the target APK/AAR file.
 
+
+## Check the key information of APK
 Usage:
+
+* Execute the command
 ```
 python apk-checker.py [full-path-to-apk-file] [file-md5-to-check]
 ```
@@ -15,10 +19,22 @@ application-label-en-GB:'app-name-en'
 Generated md5: e1a423555d9dc0905e129b784bdd75c1
 --------------------------------------------------------------------------------
 ```
-Inspired by [checkapk](https://github.com/viclee2014/checkapk).
+
+## Install the app from an AAR
+
+Usage:
+* Install JDK 17
+
+* Execute the command
+```python
+python bundle-installer.py -b AAR_FILE -ksf KEYSTORE -ksp KEYSTORE_PASS -alias ALIAS -kpass KEY_PASS
+```
 
 
+## Credits
+* [checkapk](https://github.com/viclee2014/checkapk)
 
+* [Bundle tool](https://developer.android.google.cn/tools/bundletool)
 
 
 License
