@@ -5,6 +5,7 @@ import sys
 import re
 import hashlib
 
+from typing import Any, Optional
 
 def getBaseInfo(apkpath, md5_to_check=""):
     print(80 * '-')
@@ -18,7 +19,7 @@ def getBaseInfo(apkpath, md5_to_check=""):
     result = os.popen(aapt_cmd + " d badging '%s'  " % apkpath).read()
 
     match = re.compile(
-        "package: name='(\S+)' versionCode='(\d+)' versionName='(\S+)' ").match(result)
+        "package: name='(\\S+)' versionCode='(\\d+)' versionName='(\\S+)' ").match(result)
     if not match:
         raise Exception("AAPT can't get packageinfo")
 
@@ -44,6 +45,13 @@ def getBaseInfo(apkpath, md5_to_check=""):
     res = rx.findall(abi_info)
     print("abiFilters : %s" % res)
 
+    match = re.compile("sdkVersion:'(\\S+)'").search(result)
+    minSDKVersion = match.group(0).split(':')[1]
+    # print(type(minSDKVersion))
+    match = re.compile("targetSdkVersion:'(\\S+)'").search(result)
+    targetSDKVersion = match.group(0).split(':')[1]
+    print("MinSDK : %d, TargetSDK : %d" % (to_int(minSDKVersion),  to_int(targetSDKVersion)))
+
     file = open(apkpath, "rb")
     md5_checksum = hashlib.md5(file.read()).hexdigest()
     file.close()
@@ -54,6 +62,40 @@ def getBaseInfo(apkpath, md5_to_check=""):
         print("Equal to given MD5 ? ", md5_checksum == md5_to_check)
 
     print(80 * '-')
+
+
+def to_int(value: Any, default: Optional[int] = None) -> Optional[int]:
+    """
+    Convert value to int robustly.
+    - Accepts int, float, Decimal, strings like "29", "'29'", '"29"', " 29 ", "min:29"
+    - Returns default if no integer found.
+    """
+    if value is None:
+        return default
+
+    # already an int
+    if isinstance(value, int):
+        return value
+
+    # floats -> int conversion (may lose fractional part)
+    if isinstance(value, float):
+        return int(value)
+
+    s = str(value).strip()
+
+    # strip surrounding quotes if present
+    if (len(s) >= 2) and ((s[0] == s[-1]) and s[0] in ("'", '"')):
+        s = s[1:-1].strip()
+
+    # find first integer-like token (handles negative/positive)
+    m = re.search(r'[-+]?\d+', s)
+    if m:
+        try:
+            return int(m.group(0))
+        except ValueError:
+            return default
+
+    return default
 
 
 def getCurrentDirApk():
