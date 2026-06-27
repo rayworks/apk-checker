@@ -16,18 +16,20 @@ Sample Output:
 --------------------------------------------------------------------------------
 package: name=your-app-pkgname, versionCode=**, versionName=**
 application-label-en-GB:'app-name-en'
+abiFilters : ["'arm64-v8a'"]
+MinSDK : 30, TargetSDK : 37
 Generated md5: e1a423555d9dc0905e129b784bdd75c1
 --------------------------------------------------------------------------------
 ```
 
-## Install the app from an AAR
+## Install the app from an AAB
 
 Usage:
 * Install JDK 17
 
 * Execute the command
 ```python
-python bundle-installer.py -b AAR_FILE -ksf KEYSTORE -ksp KEYSTORE_PASS -alias ALIAS -kpass KEY_PASS
+python bundle-installer.py -b AAB_FILE -ksf KEYSTORE -ksp KEYSTORE_PASS -alias ALIAS -kpass KEY_PASS
 ```
 
 
