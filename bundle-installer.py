@@ -11,7 +11,7 @@ java = ['java']
 
 log = logging.getLogger(__name__)
 parser = argparse.ArgumentParser(
-    description='Automation script to install an aab for a connected Android device')
+    description='Automation script to install an AAB for a connected Android device')
 
 parser.add_argument('-b', '--bundle', dest='bundle',
                     help='bundle file full path', required=True)
@@ -28,7 +28,7 @@ args_in = parser.parse_args()
 
 
 def run_jar(args):
-    args = java + ['-jar', './jar/bundletool-all-1.18.1.jar'] + args
+    args = java + ['-jar', './jar/bundletool-all-1.18.3.jar'] + args
 
     # print('exec cmd : %s' % args)
     out = None
@@ -54,9 +54,10 @@ def automate():
 
         if code == 0:
             print("Installing apks for connected device")
-            run_jar(
+            (code, _, err) = run_jar(
                 ['install-apks', "--apks=%s" % apks_file]
             )
+            print("Installing result code: %d , err: %s" % (code, err))
 
     except Exception as e:
         print(e)
