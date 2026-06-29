@@ -42,8 +42,10 @@ def print_apk_info(apkpath):
 
     result = os.popen(aapt_cmd + " d badging '%s'  " % apkpath).read()
 
+    # versionName may contain spaces (e.g. '48.6.19-31 [0] [PR] 825204670'),
+    # so match anything up to the closing quote rather than non-whitespace.
     match = re.compile(
-        "package: name='(\\S+)' versionCode='(\\d+)' versionName='(\\S+)' ").match(result)
+        "package: name='([^']+)' versionCode='(\\d+)' versionName='([^']*)'").search(result)
     if not match:
         raise Exception("AAPT can't get packageinfo")
 
@@ -188,8 +190,23 @@ def print_aab_info(aabpath):
 # --------------------------------------------------------------------------- #
 # Icon extraction & console rendering
 # --------------------------------------------------------------------------- #
+def _aapt_cmd():
+    return "win\\aapt.exe" if os.name == 'nt' else "./aapt"
+
+
 def _is_raster(path):
     return os.path.splitext(path)[1].lower() in RASTER_EXTS
+
+
+def _looks_raster(data):
+    """Sniffs the magic bytes — APK resource names are often obfuscated and
+    extension-less (e.g. 'res/9M'), so we can't trust the suffix."""
+    if not data or len(data) < 12:
+        return False
+    return (data[:8] == b"\x89PNG\r\n\x1a\n"                  # PNG
+            or data[:3] == b"\xff\xd8\xff"                     # JPEG
+            or data[:6] in (b"GIF87a", b"GIF89a")              # GIF
+            or (data[:4] == b"RIFF" and data[8:12] == b"WEBP"))  # WebP
 
 
 def _pick_highest_density(candidates):
@@ -198,7 +215,7 @@ def _pick_highest_density(candidates):
     best = None
     for density, path in candidates:
         d = to_int(density, 0)
-        if d == ANYDPI or not _is_raster(path):
+        if d >= ANYDPI or not _is_raster(path):
             continue
         if best is None or d > best[0]:
             best = (d, path)
@@ -224,18 +241,134 @@ def _save_icon(raw_bytes, src_name):
         return dest
 
 
-def extract_icon_apk(apkpath, badging):
-    """Extracts the highest-density raster launcher icon from an APK."""
-    candidates = re.findall(r"application-icon-(\d+):'([^']+)'", badging)
-    entry = _pick_highest_density(candidates)
-    if not entry:
-        return None
-    with zipfile.ZipFile(apkpath) as zf:
+def _save_pil(img):
+    """Saves a composited Pillow image to the cache dir as PNG."""
+    if not os.path.isdir(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    dest = os.path.join(CACHE_DIR, "app-icon.png")
+    img.save(dest, format="PNG")
+    return dest
+
+
+def _largest_raster(zf, paths):
+    """Returns the bytes of the largest decodable raster among the given zip
+    entries (by pixel area when Pillow is present, else by byte size)."""
+    best = None  # (size, data)
+    for p in paths:
         try:
-            raw = zf.read(entry)
+            data = zf.read(p)
         except KeyError:
-            return None
-    return _save_icon(raw, entry)
+            continue
+        if not _looks_raster(data):
+            continue
+        size = len(data)
+        try:
+            from PIL import Image
+            w, h = Image.open(BytesIO(data)).size
+            size = w * h
+        except Exception:
+            pass
+        if best is None or size > best[0]:
+            best = (size, data)
+    return best[1] if best else None
+
+
+def _resolve_resource_rasters(apkpath, target_ids):
+    """Maps each resource id (int) to its raster file paths inside the APK by
+    scanning `aapt dump --values resources`. Returns {id: [paths...]}."""
+    out = {tid: [] for tid in target_ids}
+    if not target_ids:
+        return out
+    proc = subprocess.run([_aapt_cmd(), "d", "--values", "resources", apkpath],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return out
+    lines = proc.stdout.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*resource (0x[0-9a-fA-F]+) ", line)
+        if not m:
+            continue
+        rid = int(m.group(1), 16)
+        if rid not in out:
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        sm = re.search(r'\(string8\)\s+"([^"]+)"', nxt)
+        if sm:
+            out[rid].append(sm.group(1))
+    return out
+
+
+def _render_adaptive_icon_apk(apkpath, zf, xml_entry):
+    """Resolves an adaptive-icon XML to its foreground/background raster layers
+    and composites them. Returns the saved path, or None if it can't rasterise
+    (e.g. vector-only layers)."""
+    proc = subprocess.run([_aapt_cmd(), "d", "xmltree", apkpath, xml_entry],
+                          capture_output=True, text=True)
+    tree = proc.stdout if proc.returncode == 0 else ""
+    if not tree:
+        return None
+
+    def layer_id(name):
+        m = re.search(
+            r"E: %s\b.*?android:drawable\(0x[0-9a-fA-F]+\)=@(0x[0-9a-fA-F]+)" % name,
+            tree, re.DOTALL)
+        return int(m.group(1), 16) if m else None
+
+    fg_id = layer_id("foreground")
+    bg_id = layer_id("background")
+    resolved = _resolve_resource_rasters(apkpath, [i for i in (fg_id, bg_id) if i])
+
+    fg = _largest_raster(zf, resolved.get(fg_id, [])) if fg_id else None
+    bg = _largest_raster(zf, resolved.get(bg_id, [])) if bg_id else None
+    if fg is None and bg is None:
+        return None
+
+    try:
+        from PIL import Image
+    except Exception:
+        # No compositing without Pillow: keep whichever single layer we have.
+        return _save_icon(fg or bg, "layer.webp")
+
+    layers = [b for b in (bg, fg) if b is not None]  # background first, then foreground
+    base = Image.open(BytesIO(layers[0])).convert("RGBA")
+    for extra in layers[1:]:
+        top = Image.open(BytesIO(extra)).convert("RGBA")
+        if top.size != base.size:
+            top = top.resize(base.size)
+        base.alpha_composite(top)
+
+    # Adaptive icons are 108dp with only the central 72dp visible; the outer
+    # 18dp on each edge is reserved for the launcher mask. Crop to that safe
+    # zone so the preview matches what a launcher actually shows.
+    w, h = base.size
+    inset_w, inset_h = int(w * 18 / 108), int(h * 18 / 108)
+    base = base.crop((inset_w, inset_h, w - inset_w, h - inset_h))
+    return _save_pil(base)
+
+
+def extract_icon_apk(apkpath, badging):
+    """Extracts and renders the launcher icon from an APK, handling plain raster
+    icons (including obfuscated/extension-less names) and adaptive (XML) icons."""
+    candidates = re.findall(r"application-icon-(\d+):'([^']+)'", badging)
+    with zipfile.ZipFile(apkpath) as zf:
+        # 1) A direct raster icon: pick the largest by actual pixels. aapt's
+        #    density numbers aren't a reliable size proxy (obfuscated resource
+        #    tables can map a higher density bucket to a smaller image).
+        paths, seen = [], set()
+        for dpi, p in candidates:
+            if to_int(dpi, 0) >= ANYDPI or p in seen:
+                continue
+            seen.add(p)
+            paths.append(p)
+        data = _largest_raster(zf, paths)
+        if data:
+            return _save_icon(data, "icon.png")
+
+        # 2) Adaptive icon: resolve the XML's layers and composite them.
+        for _, p in candidates:
+            if p.lower().endswith(".xml"):
+                return _render_adaptive_icon_apk(apkpath, zf, p)
+    return None
 
 
 def extract_icon_aab(aabpath, icon_ref):

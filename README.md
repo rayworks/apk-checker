@@ -55,8 +55,15 @@ terminals that support inline images, rendered directly in the console:
   or simply prints the saved path
 
 WebP icons are normalised to PNG when [Pillow](https://pypi.org/project/pillow/)
-is installed (`pip install pillow`). Adaptive (vector/XML) icons are skipped in
-favour of the raster density variants.
+is installed (`pip install pillow`). The icon is chosen by actual pixel size, and
+the lookup is content-sniffed, so obfuscated / extension-less resource names
+(e.g. `res/9M`) are handled.
+
+For **APKs that use an adaptive icon** (the manifest icon is an `<adaptive-icon>`
+XML with no plain raster), the foreground and background layers are resolved via
+`aapt`, composited together with Pillow, and cropped to the central safe zone so
+the result matches what a launcher displays. (For AABs, the raster density
+variants are used directly.)
 
 ## Install the app from an AAB
 
