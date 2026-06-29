@@ -1,24 +1,44 @@
 # apk-checker
 
-The python scripts used to process the target APK/AAR file.
+The python scripts used to process the target APK/AAB file.
 
 
-## Check the key information of APK
+## Check the key information of an APK / AAB
+
+A single script handles both file types and dispatches automatically based on
+the input file extension (`.apk` via `aapt`, `.aab` via the bundled
+`bundletool`). With no path argument it picks the first apk/aab found under the
+current directory.
+
 Usage:
+* Install JDK 17 (required by the bundled `bundletool` jar, used for AAB files)
 
 * Execute the command
 ```
-python apk-checker.py [full-path-to-apk-file] [file-md5-to-check]
+python app-checker.py [full-path-to-apk-or-aab-file] [file-md5-to-check]
 ```
 
-Sample Output:
+Sample Output (APK):
 ```
 --------------------------------------------------------------------------------
 package: name=your-app-pkgname, versionCode=**, versionName=**
 application-label-en-GB:'app-name-en'
 abiFilters : ["'arm64-v8a'"]
 MinSDK : 30, TargetSDK : 37
+Debuggable : False
 Generated md5: e1a423555d9dc0905e129b784bdd75c1
+--------------------------------------------------------------------------------
+```
+
+Sample Output (AAB):
+```
+--------------------------------------------------------------------------------
+package: name=your-app-pkgname, versionCode=**, versionName=**
+application-label: Your App Name (@string/app_name)
+abiFilters : ['arm64-v8a', 'armeabi-v7a']
+MinSDK : 29, TargetSDK : 35
+Debuggable : False
+Generated md5: f3835327600562e0320a4d2c8263aa25
 --------------------------------------------------------------------------------
 ```
 
