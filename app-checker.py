@@ -6,6 +6,9 @@ import re
 import hashlib
 import zipfile
 import subprocess
+import shutil
+import base64
+from io import BytesIO
 
 from typing import Any, Optional
 
@@ -21,6 +24,10 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 BUNDLETOOL_JAR = "./jar/bundletool-all-1.18.3.jar"
 
 SUPPORTED_EXTS = ('.apk', '.aab')
+
+CACHE_DIR = "./cache"
+RASTER_EXTS = ('.png', '.webp', '.jpg', '.jpeg')
+ANYDPI = 65534  # the 'anydpi' density bucket used by adaptive (XML) icons
 
 
 # --------------------------------------------------------------------------- #
@@ -73,6 +80,8 @@ def print_apk_info(apkpath):
     # aapt emits an 'application-debuggable' token only when android:debuggable="true"
     debuggable = re.search(r"^application-debuggable$", result, re.MULTILINE) is not None
     print("Debuggable : %s" % debuggable)
+
+    display_icon(extract_icon_apk(apkpath, result))
 
 
 # --------------------------------------------------------------------------- #
@@ -172,6 +181,123 @@ def print_aab_info(aabpath):
     raw_debuggable = attr(application, "debuggable")
     debuggable = str(raw_debuggable).strip().lower() == "true" or (to_int(raw_debuggable, 0) != 0)
     print("Debuggable : %s" % debuggable)
+
+    display_icon(extract_icon_aab(aabpath, attr(application, "icon")))
+
+
+# --------------------------------------------------------------------------- #
+# Icon extraction & console rendering
+# --------------------------------------------------------------------------- #
+def _is_raster(path):
+    return os.path.splitext(path)[1].lower() in RASTER_EXTS
+
+
+def _pick_highest_density(candidates):
+    """candidates: iterable of (density, zip_path). Returns the raster entry with
+    the highest density, skipping the 'anydpi' adaptive-icon XML. None if empty."""
+    best = None
+    for density, path in candidates:
+        d = to_int(density, 0)
+        if d == ANYDPI or not _is_raster(path):
+            continue
+        if best is None or d > best[0]:
+            best = (d, path)
+    return best[1] if best else None
+
+
+def _save_icon(raw_bytes, src_name):
+    """Persists icon bytes under the cache dir, normalising to PNG when Pillow is
+    available (so WebP icons render everywhere). Returns the saved path."""
+    if not os.path.isdir(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    dest = os.path.join(CACHE_DIR, "app-icon.png")
+    try:
+        from PIL import Image
+        Image.open(BytesIO(raw_bytes)).save(dest, format="PNG")
+        return dest
+    except Exception:
+        # Pillow missing or format unsupported: keep the raw file as-is.
+        ext = os.path.splitext(src_name)[1].lower() or ".img"
+        dest = os.path.join(CACHE_DIR, "app-icon" + ext)
+        with open(dest, "wb") as f:
+            f.write(raw_bytes)
+        return dest
+
+
+def extract_icon_apk(apkpath, badging):
+    """Extracts the highest-density raster launcher icon from an APK."""
+    candidates = re.findall(r"application-icon-(\d+):'([^']+)'", badging)
+    entry = _pick_highest_density(candidates)
+    if not entry:
+        return None
+    with zipfile.ZipFile(apkpath) as zf:
+        try:
+            raw = zf.read(entry)
+        except KeyError:
+            return None
+    return _save_icon(raw, entry)
+
+
+def extract_icon_aab(aabpath, icon_ref):
+    """Extracts the highest-density raster launcher icon from an AAB, resolving
+    the manifest icon reference (e.g. '@mipmap/ic_launcher') via bundletool."""
+    if not icon_ref or not icon_ref.startswith("@"):
+        return None
+    ref = icon_ref[1:].split(":", 1)[-1]  # '@mipmap/ic_launcher' -> 'mipmap/ic_launcher'
+
+    args = ['java', '-jar', BUNDLETOOL_JAR, 'dump', 'resources',
+            "--bundle=%s" % aabpath, "--resource=%s" % ref, '--values']
+    proc = subprocess.run(args, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+
+    # lines look like:  density: 640 - [FILE] res/mipmap-xxxhdpi-v4/ic_launcher.webp
+    candidates = re.findall(r"density:\s*(\d+)\s*-\s*\[FILE\]\s*(\S+)", proc.stdout)
+    res_path = _pick_highest_density(candidates)
+    if not res_path:
+        return None
+
+    # resources live in the base module: 'res/...' -> 'base/res/...'
+    with zipfile.ZipFile(aabpath) as zf:
+        names = zf.namelist()
+        entry = res_path if res_path in names else ("base/" + res_path)
+        if entry not in names:
+            entry = next((n for n in names if n.endswith(res_path)), None)
+        if not entry:
+            return None
+        raw = zf.read(entry)
+    return _save_icon(raw, res_path)
+
+
+def display_icon(image_path):
+    """Renders the icon inline when the terminal supports it, otherwise prints
+    the saved path."""
+    if not image_path:
+        print("App icon : <none found>")
+        return
+
+    print("App icon : %s" % image_path)
+    # Inline rendering only makes sense on an interactive terminal.
+    if not sys.stdout.isatty():
+        return
+    term = os.environ.get("TERM", "")
+    term_program = os.environ.get("TERM_PROGRAM", "")
+    try:
+        if ("kitty" in term or os.environ.get("KITTY_WINDOW_ID")) and shutil.which("kitty"):
+            subprocess.run(["kitty", "+kitten", "icat", "--align", "left", image_path])
+            return
+        if term_program == "iTerm.app":
+            with open(image_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            sys.stdout.write("\033]1337;File=inline=1;preserveAspectRatio=1:%s\a\n" % b64)
+            sys.stdout.flush()
+            return
+        for tool in ("chafa", "viu", "imgcat", "catimg"):
+            if shutil.which(tool):
+                subprocess.run([tool, image_path])
+                return
+    except Exception as e:
+        print("(could not render icon inline: %s)" % e)
 
 
 # --------------------------------------------------------------------------- #

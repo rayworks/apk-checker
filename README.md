@@ -26,6 +26,7 @@ application-label-en-GB:'app-name-en'
 abiFilters : ["'arm64-v8a'"]
 MinSDK : 30, TargetSDK : 37
 Debuggable : False
+App icon : ./cache/app-icon.png
 Generated md5: e1a423555d9dc0905e129b784bdd75c1
 --------------------------------------------------------------------------------
 ```
@@ -38,9 +39,24 @@ application-label: Your App Name (@string/app_name)
 abiFilters : ['arm64-v8a', 'armeabi-v7a']
 MinSDK : 29, TargetSDK : 35
 Debuggable : False
+App icon : ./cache/app-icon.png
 Generated md5: f3835327600562e0320a4d2c8263aa25
 --------------------------------------------------------------------------------
 ```
+
+### App icon
+
+The highest-density launcher icon is extracted to `./cache/app-icon.png` and, on
+terminals that support inline images, rendered directly in the console:
+
+* **kitty** — via the built-in `kitty +kitten icat`
+* **iTerm2** — via the inline-image escape sequence
+* otherwise it falls back to `chafa` / `viu` / `imgcat` / `catimg` if installed,
+  or simply prints the saved path
+
+WebP icons are normalised to PNG when [Pillow](https://pypi.org/project/pillow/)
+is installed (`pip install pillow`). Adaptive (vector/XML) icons are skipped in
+favour of the raster density variants.
 
 ## Install the app from an AAB
 
