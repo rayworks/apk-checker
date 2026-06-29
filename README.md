@@ -59,11 +59,12 @@ is installed (`pip install pillow`). The icon is chosen by actual pixel size, an
 the lookup is content-sniffed, so obfuscated / extension-less resource names
 (e.g. `res/9M`) are handled.
 
-For **APKs that use an adaptive icon** (the manifest icon is an `<adaptive-icon>`
-XML with no plain raster), the foreground and background layers are resolved via
-`aapt`, composited together with Pillow, and cropped to the central safe zone so
-the result matches what a launcher displays. (For AABs, the raster density
-variants are used directly.)
+**Adaptive icons** (the launcher icon is an `<adaptive-icon>` XML) are supported
+for both APK and AAB: when no plain raster variant exists, the foreground and
+background layers are resolved (via `aapt` for APKs, `bundletool` for AABs),
+composited together with Pillow, and cropped to the central safe zone so the
+result matches what a launcher displays. When a raster density variant is
+present it is used directly.
 
 ## Install the app from an AAB
 

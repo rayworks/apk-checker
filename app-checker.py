@@ -320,6 +320,13 @@ def _render_adaptive_icon_apk(apkpath, zf, xml_entry):
 
     fg = _largest_raster(zf, resolved.get(fg_id, [])) if fg_id else None
     bg = _largest_raster(zf, resolved.get(bg_id, [])) if bg_id else None
+    return _composite_layers(fg, bg)
+
+
+def _composite_layers(fg, bg):
+    """Composites adaptive-icon raster layers (background under foreground),
+    then crops to the visible safe zone. Returns the saved path, or None when
+    there is nothing to render."""
     if fg is None and bg is None:
         return None
 
@@ -344,6 +351,28 @@ def _render_adaptive_icon_apk(apkpath, zf, xml_entry):
     inset_w, inset_h = int(w * 18 / 108), int(h * 18 / 108)
     base = base.crop((inset_w, inset_h, w - inset_w, h - inset_h))
     return _save_pil(base)
+
+
+def _parse_proto_adaptive_layers(data):
+    """Best-effort extraction of foreground/background drawable resource names
+    from an AAB's aapt2 *proto* adaptive-icon XML (which is not plain text).
+    Returns e.g. {'foreground': 'mipmap/ic_launcher_foreground', ...}."""
+    strings = [m.decode('latin-1') for m in re.findall(rb'[ -~]{2,}', data)]
+    layer_re = re.compile(r'\W*(foreground|background|monochrome)\W*$')
+    ref_re = re.compile(r'@?((?:mipmap|drawable|color)/[A-Za-z0-9_.]+)')
+    layers = {}
+    current = None
+    for s in strings:
+        lm = layer_re.match(s)
+        if lm:
+            current = lm.group(1)
+            continue
+        if current:
+            rm = ref_re.search(s)
+            if rm:
+                layers.setdefault(current, rm.group(1))
+                current = None
+    return layers
 
 
 def extract_icon_apk(apkpath, badging):
@@ -371,35 +400,78 @@ def extract_icon_apk(apkpath, badging):
     return None
 
 
+def _bundletool_resource_values(aabpath, resource_name):
+    """Returns the `dump resources --values` text for a resource name, or ''."""
+    if not resource_name:
+        return ""
+    args = ['java', '-jar', BUNDLETOOL_JAR, 'dump', 'resources',
+            "--bundle=%s" % aabpath, "--resource=%s" % resource_name, '--values']
+    proc = subprocess.run(args, capture_output=True, text=True)
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def _aab_zip_entry(names, res_path):
+    """Maps a resource path from a bundletool dump ('res/...') to the actual zip
+    entry (resources live in the base module: 'base/res/...')."""
+    if res_path in names:
+        return res_path
+    if ("base/" + res_path) in names:
+        return "base/" + res_path
+    return next((n for n in names if n.endswith(res_path)), None)
+
+
+def _aab_raster_for_resource(aabpath, zf, names, resource_name):
+    """Resolves an AAB resource name to the largest raster file it points to."""
+    dump = _bundletool_resource_values(aabpath, resource_name)
+    if not dump:
+        return None
+    entries = []
+    for p in re.findall(r"\[FILE\]\s*(\S+)", dump):
+        entry = _aab_zip_entry(names, p)
+        if entry:
+            entries.append(entry)
+    return _largest_raster(zf, entries)
+
+
+def _render_adaptive_icon_aab(aabpath, zf, names, xml_res_path):
+    """Composites an AAB adaptive icon by parsing its proto XML for the layer
+    references and resolving each to a raster via bundletool."""
+    entry = _aab_zip_entry(names, xml_res_path)
+    if not entry:
+        return None
+    layers = _parse_proto_adaptive_layers(zf.read(entry))
+    fg = _aab_raster_for_resource(aabpath, zf, names, layers.get("foreground"))
+    bg = _aab_raster_for_resource(aabpath, zf, names, layers.get("background"))
+    return _composite_layers(fg, bg)
+
+
 def extract_icon_aab(aabpath, icon_ref):
-    """Extracts the highest-density raster launcher icon from an AAB, resolving
-    the manifest icon reference (e.g. '@mipmap/ic_launcher') via bundletool."""
+    """Extracts and renders the launcher icon from an AAB, resolving the manifest
+    icon reference (e.g. '@mipmap/ic_launcher') via bundletool. Prefers the raster
+    density variants; composites the adaptive (XML) layers when no raster exists."""
     if not icon_ref or not icon_ref.startswith("@"):
         return None
     ref = icon_ref[1:].split(":", 1)[-1]  # '@mipmap/ic_launcher' -> 'mipmap/ic_launcher'
 
-    args = ['java', '-jar', BUNDLETOOL_JAR, 'dump', 'resources',
-            "--bundle=%s" % aabpath, "--resource=%s" % ref, '--values']
-    proc = subprocess.run(args, capture_output=True, text=True)
-    if proc.returncode != 0:
+    dump = _bundletool_resource_values(aabpath, ref)
+    if not dump:
         return None
 
     # lines look like:  density: 640 - [FILE] res/mipmap-xxxhdpi-v4/ic_launcher.webp
-    candidates = re.findall(r"density:\s*(\d+)\s*-\s*\[FILE\]\s*(\S+)", proc.stdout)
+    candidates = re.findall(r"density:\s*(\d+)\s*-\s*\[FILE\]\s*(\S+)", dump)
     res_path = _pick_highest_density(candidates)
-    if not res_path:
-        return None
+    xml_path = next((p for d, p in candidates
+                     if to_int(d, 0) >= ANYDPI and p.lower().endswith(".xml")), None)
 
-    # resources live in the base module: 'res/...' -> 'base/res/...'
     with zipfile.ZipFile(aabpath) as zf:
         names = zf.namelist()
-        entry = res_path if res_path in names else ("base/" + res_path)
-        if entry not in names:
-            entry = next((n for n in names if n.endswith(res_path)), None)
-        if not entry:
-            return None
-        raw = zf.read(entry)
-    return _save_icon(raw, res_path)
+        if res_path:  # a plain raster variant exists — use it directly
+            entry = _aab_zip_entry(names, res_path)
+            if entry:
+                return _save_icon(zf.read(entry), res_path)
+        if xml_path:  # adaptive-only icon — composite the layers
+            return _render_adaptive_icon_aab(aabpath, zf, names, xml_path)
+    return None
 
 
 def display_icon(image_path):
